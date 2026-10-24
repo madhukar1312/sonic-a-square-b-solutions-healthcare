@@ -1,0 +1,9 @@
+SONIC HEALTHCARE — DEMONSTRATION ONLY
+SAMPLE APPOINTMENT CONFIRMATION
+Not a real booking, payment receipt, or medical document.
+Patient: Demo Patient
+Doctor: Dr. Arjun Mehta (Cardiologist)
+Date: Oct 26, 2026, 10:30 AM
+Consultation: Video
+Sample fee: ₹1,500
+Reference: DEMO-MVMFLK5L
