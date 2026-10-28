@@ -7,6 +7,7 @@
   <meta name="description" content="Connect with qualified healthcare professionals from the comfort of your home with Sonic Healthcare.">
   <title>Sonic A Square B solutions Healthcare — Care that comes to you</title>
   <link rel="stylesheet" href="styles.css">
+  <script src="translations.js" defer></script>
   <script src="script.js" defer></script>
 </head>
 <body>
@@ -26,6 +27,7 @@
         <a class="nav-link" href="#how-it-works">How It Works</a>
         <a class="nav-link" href="#about">About Us</a>
         <div class="nav-actions">
+          <label class="language-switch" for="language-select"><span class="visually-hidden">Language</span><select id="language-select" aria-label="Language"><option value="en">English</option><option value="te">తెలుగు</option></select></label>
           <button class="button button-outline button-small" type="button" data-auth-action="login">Patient Login</button>
           <a class="button button-primary button-small" href="#doctor-login" data-doctor-access>Doctor Login <span aria-hidden="true">↗</span></a>
         </div>
@@ -96,7 +98,6 @@
           <h2>Your care, <span>all in one place.</span></h2>
           <p>Find a doctor, arrange a consultation, and keep track of your care.</p>
         </div>
-        <p class="demo-notice" role="note"><strong>Prototype preview:</strong> This demonstration does not connect to a healthcare provider or store real health information. Use fictional details only. Medical records, payments, identity verification, and video calls require a secure clinical service.</p>
         <div class="portal-layout">
           <aside class="portal-sidebar" aria-label="Patient portal navigation">
             <div class="portal-account" id="portal-account">
@@ -114,43 +115,34 @@
           </aside>
           <div class="portal-content">
             <section class="portal-panel" id="panel-doctors" aria-labelledby="doctors-heading">
-              <div class="portal-panel-heading"><div><span class="eyebrow">CARE, ON YOUR TERMS</span><h3 id="doctors-heading">Find your doctor</h3><p>Browse our sample directory and compare consultation fees.</p></div><span class="sample-label">Sample directory</span></div>
+              <div class="portal-panel-heading"><div><span class="eyebrow">CARE, ON YOUR TERMS</span><h3 id="doctors-heading">Find your doctor</h3><p>Search verified healthcare professionals and current consultation fees.</p></div></div>
               <form class="doctor-search" id="doctor-search">
                 <label class="visually-hidden" for="doctor-query">Search doctor or specialty</label>
                 <input id="doctor-query" type="search" placeholder="Doctor name or specialty">
                 <label class="visually-hidden" for="fee-filter">Filter by consultation fee</label>
-                <select id="fee-filter"><option value="all">Any consultation fee</option><option value="1000">Up to ₹1,000</option><option value="1500">Up to ₹1,500</option></select>
+                <select id="fee-filter"><option value="all">Any consultation fee</option><option value="400">Up to ₹400</option><option value="600">Up to ₹600</option></select>
                 <button class="button button-primary" type="submit">Search</button>
               </form>
               <div class="doctor-results" id="doctor-results" aria-live="polite"></div>
             </section>
 
             <section class="portal-panel" id="panel-appointments" aria-labelledby="appointments-heading" hidden>
-              <div class="portal-panel-heading"><div><span class="eyebrow">YOUR VISITS</span><h3 id="appointments-heading">Appointments</h3><p>Review bookings and access available confirmations.</p></div></div>
+              <div class="portal-panel-heading"><div><span class="eyebrow">YOUR VISITS</span><h3 id="appointments-heading">Appointments</h3><p>Review appointments linked to your account.</p></div></div>
               <div id="appointment-list"></div>
             </section>
 
             <section class="portal-panel" id="panel-records" aria-labelledby="records-heading" hidden>
-              <div class="portal-panel-heading"><div><span class="eyebrow">PRIVATE BY DESIGN</span><h3 id="records-heading">Care documents</h3><p>Sample prescriptions, records, and follow-up recommendations.</p></div></div>
-              <div class="authorization-card">
-                <div><strong>Authorized access</strong><p>Confirm to reveal fictional sample documents for this demo session.</p></div>
-                <label class="switch-label"><input id="records-authorized" type="checkbox"><span>Authorize</span></label>
-              </div>
-              <div id="records-content" class="records-content" aria-live="polite"><p class="empty-state">Authorize access to view sample documents and recommendations.</p></div>
-              <form class="upload-form" id="document-upload">
-                <label for="medical-document"><strong>Upload a relevant document</strong><span>Filenames only are kept temporarily in this demo; file contents are not uploaded.</span></label>
-                <input id="medical-document" type="file" accept=".pdf,.png,.jpg,.jpeg,.txt,.doc,.docx">
-                <button class="button button-outline" type="submit">Add document</button>
-              </form>
-              <ul class="uploaded-files" id="uploaded-files" aria-live="polite"></ul>
+              <div class="portal-panel-heading"><div><span class="eyebrow">YOUR HEALTH RECORDS</span><h3 id="records-heading">Medical records and prescriptions</h3><p>Records and prescriptions linked to your account.</p></div></div>
+              <div id="records-content" class="records-content" aria-live="polite"><p class="empty-state">Sign in to view your medical records.</p></div>
             </section>
 
             <section class="portal-panel" id="panel-profile" aria-labelledby="profile-heading" hidden>
-              <div class="portal-panel-heading"><div><span class="eyebrow">YOUR DETAILS</span><h3 id="profile-heading">Patient profile</h3><p>Manage your contact details for this temporary demo session.</p></div></div>
+              <div class="portal-panel-heading"><div><span class="eyebrow">YOUR DETAILS</span><h3 id="profile-heading">Patient profile</h3><p>Update the contact details associated with your account.</p></div></div>
               <form class="profile-form" id="profile-form">
                 <label>Full name<input name="name" autocomplete="name" required maxlength="80" placeholder="Your name"></label>
-                <label>Email address<input name="email" type="email" autocomplete="email" required maxlength="120" placeholder="you@example.com"></label>
+                <label>Email address<input name="email" type="email" autocomplete="email" required maxlength="120" readonly></label>
                 <label>Phone number<input name="phone" type="tel" autocomplete="tel" maxlength="24" placeholder="Your phone number"></label>
+                <label>Preferred language<select name="language"><option value="en">English</option><option value="te">తెలుగు</option></select></label>
                 <button class="button button-primary" type="submit">Save profile</button>
                 <p class="form-message" id="profile-message" role="status"></p>
               </form>
@@ -166,12 +158,11 @@
           <h2>Your practice, <span>in one place.</span></h2>
           <p>Appointments, consultations, profile, and practice reports.</p>
         </div>
-        <p class="demo-notice" role="note"><strong>Doctor demo only:</strong> This static prototype does not provide secure login, verify credentials, store clinical records, issue valid prescriptions, or connect consultations. All dashboard content is fictional and exists only in this browser session. Production access requires secure, role-based backend authentication and authorization.</p>
         <div class="portal-layout doctor-layout">
           <aside class="portal-sidebar" aria-label="Doctor workspace navigation">
             <div class="portal-account" id="doctor-account">
               <span class="account-avatar" aria-hidden="true">D</span>
-              <span><strong>Doctor demo</strong><small>Demo access only</small></span>
+              <span><strong>Doctor </strong><small>access only</small></span>
             </div>
             <nav class="portal-tabs" aria-label="Doctor workspace sections">
               <button type="button" class="portal-tab is-active" data-doctor-panel="overview" aria-current="page"><span aria-hidden="true">▦</span> Overview</button>
@@ -179,86 +170,78 @@
               <button type="button" class="portal-tab" data-doctor-panel="availability"><span aria-hidden="true">▣</span> Availability</button>
               <button type="button" class="portal-tab" data-doctor-panel="profile"><span aria-hidden="true">◉</span> Professional profile</button>
               <button type="button" class="portal-tab" data-doctor-panel="credentials"><span aria-hidden="true">✓</span> Credentials</button>
-              <button type="button" class="portal-tab" data-doctor-panel="consultation"><span aria-hidden="true">▤</span> Notes & prescriptions</button>
+              <button type="button" class="portal-tab" data-doctor-panel="consultation"><span aria-hidden="true">▤</span> Prescriptions</button>
               <button type="button" class="portal-tab" data-doctor-panel="reports"><span aria-hidden="true">↗</span> Reports</button>
             </nav>
-            <button class="portal-logout" type="button" data-doctor-signout>Exit doctor demo</button>
+            <button class="portal-logout" type="button" data-doctor-signout>Exit from doctor session</button>
           </aside>
           <div class="portal-content doctor-content">
             <section class="portal-panel" id="doctor-panel-overview" aria-labelledby="doctor-overview-heading">
-              <div class="portal-panel-heading"><div><span class="eyebrow">PRACTICE SNAPSHOT</span><h3 id="doctor-overview-heading">Good day, doctor</h3><p>Your sample schedule and practice activity at a glance.</p></div><span class="sample-label">Fictional data</span></div>
+              <div class="portal-panel-heading"><div><span class="eyebrow">PRACTICE SNAPSHOT</span><h3 id="doctor-overview-heading">Good day, doctor</h3><p>Your appointments and account activity.</p></div></div>
               <div class="doctor-stat-grid">
-                <article class="doctor-stat"><span>Today's appointments</span><strong>4</strong><small>2 upcoming · sample</small></article>
-                <article class="doctor-stat"><span>Completed this month</span><strong>28</strong><small>Illustrative activity</small></article>
-                <article class="doctor-stat"><span>Pending requests</span><strong id="pending-count">2</strong><small>Review sample requests</small></article>
-                <article class="doctor-stat"><span>Sample earnings</span><strong>₹24,600</strong><small>Demo report only</small></article>
+                <article class="doctor-stat"><span>Upcoming appointments</span><strong id="doctor-upcoming-count">0</strong><small>From your account</small></article>
+                <article class="doctor-stat"><span>Paid appointments</span><strong id="doctor-monthly-consultations">0</strong><small>Payments recorded</small></article>
+                <article class="doctor-stat"><span>Pending payment</span><strong id="pending-count">0</strong><small>Awaiting patient payment</small></article>
+                <article class="doctor-stat"><span>Doctor earnings</span><strong id="doctor-net-earnings">₹0</strong><small>Recorded payments</small></article>
               </div>
-              <div class="portal-panel-heading doctor-subheading"><div><h3>Appointment requests</h3><p>Accept or decline fictional patient requests.</p></div><button class="text-action" type="button" data-open-doctor-panel="appointments">View all</button></div>
+              <div class="portal-panel-heading doctor-subheading"><div><h3>Appointment requests</h3><p>Review appointments assigned to your account.</p></div><button class="text-action" type="button" data-open-doctor-panel="appointments">View all</button></div>
               <div id="doctor-upcoming-list"></div>
             </section>
 
             <section class="portal-panel" id="doctor-panel-appointments" aria-labelledby="doctor-appointments-heading" hidden>
-              <div class="portal-panel-heading"><div><span class="eyebrow">YOUR SCHEDULE</span><h3 id="doctor-appointments-heading">Appointments</h3><p>Review requests and manage your sample consultations.</p></div></div>
+              <div class="portal-panel-heading"><div><span class="eyebrow">YOUR SCHEDULE</span><h3 id="doctor-appointments-heading">Appointments</h3><p>Review and manage appointments assigned to your account.</p></div></div>
               <div id="doctor-appointment-list"></div>
             </section>
 
             <section class="portal-panel" id="doctor-panel-availability" aria-labelledby="doctor-availability-heading" hidden>
-              <div class="portal-panel-heading"><div><span class="eyebrow">SET YOUR HOURS</span><h3 id="doctor-availability-heading">Availability</h3><p>Choose sample consultation days and hours for this session.</p></div></div>
+              <div class="portal-panel-heading"><div><span class="eyebrow">SET YOUR HOURS</span><h3 id="doctor-availability-heading">Availability</h3><p>Add an available appointment time.</p></div></div>
               <form class="doctor-form" id="doctor-availability-form">
-                <fieldset class="availability-days"><legend>Available days</legend>
-                  <label><input type="checkbox" name="day" value="Monday" checked> Monday</label><label><input type="checkbox" name="day" value="Tuesday" checked> Tuesday</label><label><input type="checkbox" name="day" value="Wednesday"> Wednesday</label><label><input type="checkbox" name="day" value="Thursday" checked> Thursday</label><label><input type="checkbox" name="day" value="Friday" checked> Friday</label><label><input type="checkbox" name="day" value="Saturday"> Saturday</label><label><input type="checkbox" name="day" value="Sunday"> Sunday</label>
-                </fieldset>
-                <div class="doctor-form-row"><label>Start time<input name="start" type="time" value="09:00" required></label><label>End time<input name="end" type="time" value="17:00" required></label></div>
-                <button class="button button-primary" type="submit">Save availability</button><p class="form-message" id="availability-message" role="status"></p>
+                <div class="doctor-form-row"><label>Start<input name="startAt" type="datetime-local" required></label><label>End<input name="endAt" type="datetime-local" required></label></div>
+                <button class="button button-primary" type="submit">Add appointment time</button><p class="form-message" id="availability-message" role="status"></p>
               </form>
+              <div id="doctor-availability-list" aria-live="polite"></div>
             </section>
 
             <section class="portal-panel" id="doctor-panel-profile" aria-labelledby="doctor-profile-heading" hidden>
-              <div class="portal-panel-heading"><div><span class="eyebrow">YOUR PUBLIC DETAILS</span><h3 id="doctor-profile-heading">Professional profile</h3><p>Update the sample details shown in your doctor profile.</p></div></div>
+              <div class="portal-panel-heading"><div><span class="eyebrow">YOUR PUBLIC DETAILS</span><h3 id="doctor-profile-heading">Professional profile</h3><p>Update the professional details linked to your account.</p></div></div>
               <form class="doctor-form" id="doctor-profile-form">
-                <div class="doctor-form-row"><label>Full name<input name="name" required maxlength="80" value="Dr. Alex Morgan"></label><label>Specialty<input name="specialty" required maxlength="80" value="General physician"></label></div>
-                <div class="doctor-form-row"><label>Years of experience<input name="experience" type="number" min="0" max="70" value="10" required></label><label>Consultation fee (₹)<input name="fee" type="number" min="0" max="100000" value="900" required></label></div>
-                <label>About your practice<textarea name="bio" rows="3" maxlength="500">Primary care and preventive health consultations.</textarea></label>
+                <div class="doctor-form-row"><label>Full name<input name="name" required minlength="2" maxlength="120"></label><label>Specialty<input name="specialty" maxlength="100"></label></div>
+                <label>Consultation fee (₹)<input name="fee" type="number" min="350" max="600" step="1"></label>
+                <label>About your practice<textarea name="bio" rows="3" maxlength="2000"></textarea></label>
                 <button class="button button-primary" type="submit">Save profile</button><p class="form-message" id="doctor-profile-message" role="status"></p>
               </form>
             </section>
 
             <section class="portal-panel" id="doctor-panel-credentials" aria-labelledby="doctor-credentials-heading" hidden>
-              <div class="portal-panel-heading"><div><span class="eyebrow">PROVIDER VERIFICATION</span><h3 id="doctor-credentials-heading">Credentials</h3><p>Submit sample credential details for a verification workflow preview.</p></div></div>
-              <div class="authorization-card"><div><strong>Verification status</strong><p id="credential-status">Not submitted in this demo session.</p></div><span class="sample-label">Not verified</span></div>
-              <form class="doctor-form credential-form" id="credential-form">
-                <label>Registration or license number<input name="registration" required maxlength="80" placeholder="Enter a fictional registration number"></label>
-                <label>Issuing authority<input name="authority" required maxlength="120" placeholder="Medical council or authority"></label>
-                <label>Credential file name<input name="credential-file" type="file" accept=".pdf,.jpg,.jpeg,.png"></label>
-                <p class="dialog-disclaimer">Only the selected filename is noted in this demo; file contents are not uploaded. No verification is performed.</p>
-                <button class="button button-primary" type="submit">Submit for demo review</button><p class="form-message" id="credential-message" role="status"></p>
-              </form>
+              <div class="portal-panel-heading"><div><span class="eyebrow">PROVIDER VERIFICATION</span><h3 id="doctor-credentials-heading">Credentials</h3><p>Submit documents for administrator review.</p></div></div>
+              <div class="authorization-card"><div><strong>Verification status</strong><p id="credential-status">Pending</p></div></div>
+              <p class="empty-state">Credential submission is unavailable until private document storage is configured by an administrator.</p>
             </section>
 
             <section class="portal-panel" id="doctor-panel-consultation" aria-labelledby="doctor-consultation-heading" hidden>
-              <div class="portal-panel-heading"><div><span class="eyebrow">AUTHORIZED CARE</span><h3 id="doctor-consultation-heading">Consultation workspace</h3><p>Preview notes, prescriptions, patient history, and follow-up tools.</p></div></div>
-              <div class="authorization-card"><div><strong>Patient history access</strong><p>Authorize this fictional consultation to reveal its sample history.</p></div><label class="switch-label"><input id="doctor-records-authorized" type="checkbox"><span>Authorize</span></label></div>
-              <div id="doctor-history-content" class="doctor-history"><p class="empty-state">Authorize access to view fictional patient history.</p></div>
-              <div class="doctor-call-actions"><button type="button" class="button button-outline" data-doctor-call="Audio">Start audio preview</button><button type="button" class="button button-outline" data-doctor-call="Video">Start video preview</button></div>
+              <div class="portal-panel-heading"><div><span class="eyebrow">AUTHORIZED CARE</span><h3 id="doctor-consultation-heading">Consultation workspace</h3><p>Review assigned appointments and prescriptions.</p></div></div>
+              <div id="doctor-history-content" class="doctor-history"><p class="empty-state">Select an assigned, paid appointment to view authorized patient details.</p></div>
               <form class="doctor-form clinical-form" id="clinical-form">
-                <label>Consultation notes<textarea name="notes" rows="4" maxlength="2000" required placeholder="Add fictional consultation notes"></textarea></label>
-                <label>Prescription details<textarea name="prescription" rows="3" maxlength="1000" placeholder="Medicine, dosage, and instructions"></textarea></label>
-                <label>Follow-up recommendation<textarea name="followup" rows="2" maxlength="500" placeholder="Recommended follow-up"></textarea></label>
-                <p class="dialog-disclaimer">Demo only. Notes are session-only; prescription output is not a valid prescription and cannot be issued to a pharmacy.</p>
-                <div class="doctor-call-actions"><button class="button button-outline" type="submit" name="action" value="save">Save demo consultation</button><button class="button button-primary" type="submit" name="action" value="prescription">Issue demo prescription</button></div><p class="form-message" id="clinical-message" role="status"></p>
+                <label>Authorized appointment<select id="clinical-appointment" name="appointmentId" required><option value="">Select an assigned paid appointment</option></select></label>
+                <label>Medicine or prescribed item<input name="itemName" required maxlength="160"></label>
+                <div class="doctor-form-row"><label>Dosage<input name="dosage" maxlength="120"></label><label>Frequency<input name="frequency" maxlength="120"></label></div>
+                <label>Duration<input name="duration" maxlength="120"></label>
+                <label>Instructions<textarea name="instructions" rows="3" maxlength="500"></textarea></label>
+                <p class="dialog-disclaimer">Only submit prescriptions for an assigned, paid appointment. Prescription access depends on verified doctor status.</p>
+                <button class="button button-primary" type="submit">Record prescription</button><p class="form-message" id="clinical-message" role="status"></p>
               </form>
               <div id="clinical-items" aria-live="polite"></div>
             </section>
 
             <section class="portal-panel" id="doctor-panel-reports" aria-labelledby="doctor-reports-heading" hidden>
-              <div class="portal-panel-heading"><div><span class="eyebrow">PRACTICE PERFORMANCE</span><h3 id="doctor-reports-heading">Statistics & financial reports</h3><p>Fictional sample figures for this doctor's demo role.</p></div><span class="sample-label">Illustrative only</span></div>
+              <div class="portal-panel-heading"><div><span class="eyebrow">PRACTICE PERFORMANCE</span><h3 id="doctor-reports-heading">Statistics & financial reports</h3><p>Totals from completed payment records.</p></div></div>
               <div class="doctor-stat-grid">
-                <article class="doctor-stat"><span>Consultations this month</span><strong>28</strong><small>22 video · 6 audio</small></article>
-                <article class="doctor-stat"><span>Average rating</span><strong>4.8</strong><small>Sample from 19 reviews</small></article>
-                <article class="doctor-stat"><span>Gross consultation fees</span><strong>₹31,500</strong><small>Fictional monthly total</small></article>
-                <article class="doctor-stat"><span>Platform adjustments</span><strong>₹6,900</strong><small>Illustrative deductions</small></article>
+                <article class="doctor-stat"><span>Paid appointments</span><strong id="doctor-report-paid-payments">0</strong><small>All recorded payments</small></article>
+                <article class="doctor-stat"><span>Gross consultation fees</span><strong id="doctor-gross-fees">₹0</strong><small>Before platform commission</small></article>
+                <article class="doctor-stat"><span>Platform adjustments</span><strong id="doctor-platform-adjustments">₹0</strong><small>Recorded commission</small></article>
+                <article class="doctor-stat"><span>Doctor earnings</span><strong id="doctor-report-net-earnings">₹0</strong><small>After recorded commission</small></article>
               </div>
-              <div class="report-table-wrap"><table class="report-table"><caption>Sample monthly financial summary</caption><tbody><tr><th scope="row">Completed consultations</th><td>28</td></tr><tr><th scope="row">Gross fees</th><td>₹31,500</td></tr><tr><th scope="row">Adjustments and fees</th><td>−₹6,900</td></tr><tr><th scope="row">Estimated net amount</th><td>₹24,600</td></tr></tbody></table></div>
+              <div class="report-table-wrap"><table class="report-table"><caption>Payment summary</caption><tbody><tr><th scope="row">Paid appointments</th><td id="doctor-report-consultations">0</td></tr><tr><th scope="row">Gross fees</th><td id="doctor-report-gross">₹0</td></tr><tr><th scope="row">Platform adjustments</th><td id="doctor-report-adjustments">₹0</td></tr><tr><th scope="row">Doctor earnings</th><td id="doctor-net-amount">₹0</td></tr></tbody></table></div>
             </section>
           </div>
         </div>

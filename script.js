@@ -3,45 +3,84 @@ const primaryNav = document.querySelector('.primary-nav');
 const dialog = document.querySelector('#portal-dialog');
 const dialogContent = document.querySelector('#dialog-content');
 const toast = document.querySelector('#portal-toast');
-
-const doctors = [
-  { id: 'maya-shah', name: 'Dr. Maya Shah', specialty: 'General physician', fee: 800, initials: 'MS', color: 'teal', bio: 'Primary care and everyday health concerns. 12 years of experience.' },
-  { id: 'arjun-mehta', name: 'Dr. Arjun Mehta', specialty: 'Cardiologist', fee: 1500, initials: 'AM', color: 'blue', bio: 'Heart health, prevention, and cardiovascular wellbeing. 15 years of experience.' },
-  { id: 'leena-rao', name: 'Dr. Leena Rao', specialty: 'Dermatologist', fee: 1200, initials: 'LR', color: 'lilac', bio: 'Skin health and common dermatological concerns. 9 years of experience.' },
-  { id: 'kabir-iyer', name: 'Dr. Kabir Iyer', specialty: 'General physician', fee: 700, initials: 'KI', color: 'peach', bio: 'Family medicine and preventive care. 8 years of experience.' }
-];
+const i18n = window.SonicI18n;
+let razorpayScriptPromise;
 
 const session = {
+  user: null,
   patient: null,
   appointments: [],
-  uploadedFiles: [],
-  recordsAuthorized: false,
-  activeDoctor: null,
+  doctors: [],
   doctor: null,
   doctorProfile: null,
-  doctorAppointments: [
-    { id: 'REQ-2041', patient: 'Sam Taylor', date: '2026-10-26', time: '09:30', type: 'Video', status: 'Pending' },
-    { id: 'REQ-2042', patient: 'Jordan Lee', date: '2026-10-26', time: '11:00', type: 'Audio', status: 'Pending' },
-    { id: 'REQ-2043', patient: 'Casey Morgan', date: '2026-10-27', time: '14:00', type: 'Video', status: 'Accepted' }
-  ],
-  clinicalItems: [],
-  doctorRecordsAuthorized: false,
-  doctorCredentialStatus: 'Not submitted in this demo session.',
-  doctorAvailability: null
+  doctorAppointments: [],
+  doctorCredentialStatus: '',
+  doctorAvailability: []
 };
+
+class ApiRequestError extends Error {
+  constructor(message, status, code) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
+async function apiRequest(path, options = {}) {
+  const method = options.method || 'GET';
+  const headers = { Accept: 'application/json' };
+  if (options.body !== undefined) headers['Content-Type'] = 'application/json';
+  if (['POST', 'PATCH', 'DELETE'].includes(method)) {
+    const csrfResponse = await fetch('/api/auth/csrf', { credentials: 'same-origin', cache: 'no-store' });
+    const csrfPayload = await csrfResponse.json();
+    if (!csrfResponse.ok || !csrfPayload.csrfToken) {
+      throw new ApiRequestError('Could not establish a secure request token.', csrfResponse.status, 'CSRF_UNAVAILABLE');
+    }
+    headers['x-csrf-token'] = csrfPayload.csrfToken;
+  }
+  const response = await fetch(`/api/${path}`, {
+    method,
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body)
+  });
+  const text = await response.text();
+  let payload = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      throw new ApiRequestError('The server returned an invalid response.', response.status, 'INVALID_RESPONSE');
+    }
+  }
+  if (!response.ok) {
+    throw new ApiRequestError(
+      payload?.error?.message || 'The request could not be completed.',
+      response.status,
+      payload?.error?.code || 'REQUEST_FAILED'
+    );
+  }
+  return payload;
+}
+
+function showApiError(error) {
+  showToast(error instanceof Error ? error.message : 'The request could not be completed.');
+}
 
 if (menuToggle && primaryNav) {
   menuToggle.addEventListener('click', () => {
     const isOpen = menuToggle.getAttribute('aria-expanded') === 'true';
     menuToggle.setAttribute('aria-expanded', String(!isOpen));
-    menuToggle.setAttribute('aria-label', isOpen ? 'Open navigation menu' : 'Close navigation menu');
+    menuToggle.setAttribute('aria-label', i18n.translate(isOpen ? 'Open navigation menu' : 'Close navigation menu'));
     primaryNav.classList.toggle('is-open', !isOpen);
   });
 
   primaryNav.querySelectorAll('a').forEach((link) => {
     link.addEventListener('click', () => {
       menuToggle.setAttribute('aria-expanded', 'false');
-      menuToggle.setAttribute('aria-label', 'Open navigation menu');
+      menuToggle.setAttribute('aria-label', i18n.translate('Open navigation menu'));
       primaryNav.classList.remove('is-open');
     });
   });
@@ -50,7 +89,7 @@ if (menuToggle && primaryNav) {
 document.querySelector('#year').textContent = new Date().getFullYear();
 
 function showToast(message) {
-  toast.textContent = message;
+  toast.textContent = i18n.translate(message);
   toast.classList.add('is-visible');
   window.clearTimeout(showToast.timeout);
   showToast.timeout = window.setTimeout(() => toast.classList.remove('is-visible'), 3200);
@@ -68,107 +107,120 @@ function elementFromHtml(markup) {
 }
 
 function requireSignIn() {
-  if (session.patient) return true;
+  if (session.user?.role === 'Patient') return true;
   showAuthDialog('login');
   return false;
 }
 
-function showAuthDialog(mode) {
+function showAuthDialog(mode, preferredRole = 'Patient') {
   const registering = mode === 'register';
+  const roleOptions = `<label>Account type<select name="role" required><option value="Patient"${preferredRole === 'Patient' ? ' selected' : ''}>Patient</option><option value="Doctor"${preferredRole === 'Doctor' ? ' selected' : ''}>Doctor</option></select></label>`;
   const form = elementFromHtml(`
     <div class="dialog-heading">
-      <span class="eyebrow">PATIENT PORTAL · DEMO</span>
-      <h2 id="dialog-title">${registering ? 'Create your patient profile' : 'Welcome back'}</h2>
-      <p>${registering ? 'Set up a temporary profile for this browser session.' : 'Enter your email to start a temporary demo session.'}</p>
+      <span class="eyebrow">SECURE ACCOUNT</span>
+      <h2 id="dialog-title">${registering ? 'Create your account' : 'Sign in to your account'}</h2>
+      <p>${registering ? 'Your account will be stored securely.' : 'Use your registered email and password.'}</p>
     </div>
     <form class="dialog-form" id="auth-form">
-      ${registering ? '<label>Full name<input name="name" autocomplete="name" required maxlength="80" placeholder="Your name"></label>' : ''}
+      ${registering ? `${roleOptions}<label>Full name<input name="fullName" autocomplete="name" required minlength="2" maxlength="120" placeholder="Your name"></label>` : ''}
       <label>Email address<input name="email" type="email" autocomplete="email" required maxlength="120" placeholder="you@example.com"></label>
-      <p class="dialog-disclaimer">Demo only. No password or account is created, and your details are cleared when this page is refreshed.</p>
-      <button class="button button-primary" type="submit">${registering ? 'Continue' : 'Start demo session'}</button>
+      <label>Password<input name="password" type="password" autocomplete="${registering ? 'new-password' : 'current-password'}" required minlength="12" maxlength="128"></label>
+      ${registering && preferredRole === 'Doctor' ? '<p class="dialog-disclaimer">Doctor accounts remain pending until an administrator verifies the required credentials.</p>' : ''}
+      <p class="form-message" id="auth-message" role="status"></p>
+      <button class="button button-primary" type="submit">Continue</button>
     </form>
-    <button type="button" class="dialog-switch" data-auth-action="${registering ? 'login' : 'register'}">${registering ? 'Already have a profile? Sign in' : 'New here? Create a profile'}</button>
+    <button type="button" class="dialog-switch" data-auth-switch="${registering ? 'login' : 'register'}">${registering ? 'Already have an account? Sign in' : 'New here? Create an account'}</button>
   `);
   openDialog(form);
 
-  document.querySelector('#auth-form').addEventListener('submit', (event) => {
+  document.querySelector('[data-auth-switch]').addEventListener('click', () => {
+    const role = registering ? document.querySelector('#auth-form [name=role]').value : preferredRole;
+    showAuthDialog(registering ? 'login' : 'register', role);
+  });
+  document.querySelector('#auth-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const email = String(data.get('email')).trim();
-    const name = registering ? String(data.get('name')).trim() : (session.patient?.name || email.split('@')[0]);
-    session.patient = { name, email, phone: '' };
-    session.recordsAuthorized = false;
-    session.doctor = null;
-    session.doctorProfile = null;
-    session.clinicalItems = [];
-    session.doctorRecordsAuthorized = false;
-    document.querySelector('#doctor-login').hidden = true;
-    document.querySelector('#patient-portal').hidden = false;
-    dialog.close();
-    updateAccount();
-    updateDoctorAccount();
-    updateProfileForm();
-    showToast(`Demo session started for ${name}.`);
-    if (registering) selectPanel('profile');
+    const role = registering ? String(data.get('role')) : undefined;
+    const submit = event.currentTarget.querySelector('[type=submit]');
+    submit.disabled = true;
+    try {
+      const result = registering
+        ? await apiRequest(`auth/register/${role.toLowerCase()}`, {
+          method: 'POST',
+          body: { fullName: String(data.get('fullName')).trim(), email, password: String(data.get('password')) }
+        })
+        : await apiRequest('auth/login', {
+          method: 'POST',
+          body: { email, password: String(data.get('password')) }
+        });
+      await openAuthenticatedAccount(result.user);
+      dialog.close();
+      showToast(result.user.role === 'Doctor' && registering
+        ? 'Account created. Doctor profile is pending credential verification.'
+        : 'You are signed in.');
+    } catch (error) {
+      document.querySelector('#auth-message').textContent =
+        i18n.translate(error instanceof Error ? error.message : 'The request could not be completed.');
+    } finally {
+      submit.disabled = false;
+    }
   });
 }
 
-function showDoctorAuthDialog() {
-  const content = elementFromHtml(`
-    <div class="dialog-heading">
-      <span class="eyebrow">DOCTOR WORKSPACE · DEMO</span>
-      <h2 id="dialog-title">Doctor demo access</h2>
-      <p>Enter a sample email to preview the separate doctor workspace.</p>
-    </div>
-    <form class="dialog-form" id="doctor-auth-form">
-      <label>Email address<input name="email" type="email" autocomplete="email" required maxlength="120" placeholder="doctor@example.com"></label>
-      <p class="dialog-disclaimer">This prototype does not authenticate users or provide secure access. No password or real account is used.</p>
-      <button class="button button-primary" type="submit">Enter doctor demo</button>
-    </form>
-  `);
-  openDialog(content);
-  document.querySelector('#doctor-auth-form').addEventListener('submit', (event) => {
-    event.preventDefault();
-    const email = String(new FormData(event.currentTarget).get('email')).trim();
-    session.patient = null;
-    session.appointments = [];
-    session.uploadedFiles = [];
-    session.recordsAuthorized = false;
-    session.doctor = { name: 'Dr. Alex Morgan', email };
-    session.doctorProfile = {
-      name: 'Dr. Alex Morgan',
-      specialty: 'General physician',
-      experience: 10,
-      fee: 900,
-      bio: 'Primary care and preventive health consultations.'
+async function openAuthenticatedAccount(user) {
+  session.user = user;
+  session.appointments = [];
+  session.doctorAppointments = [];
+  if (user.role === 'Patient') {
+    const [profile, language] = await Promise.all([
+      apiRequest('patients/me'),
+      apiRequest('profile/language')
+    ]);
+    session.patient = {
+      name: profile.fullName,
+      email: profile.email,
+      phone: profile.phone || '',
+      preferredLanguage: language.language
     };
-    session.doctorRecordsAuthorized = false;
-    session.clinicalItems = [];
-    session.doctorCredentialStatus = 'Not submitted in this demo session.';
-    session.doctorAvailability = null;
-    session.doctorAppointments = [
-      { id: 'REQ-2041', patient: 'Sam Taylor', date: '2026-10-26', time: '09:30', type: 'Video', status: 'Pending' },
-      { id: 'REQ-2042', patient: 'Jordan Lee', date: '2026-10-26', time: '11:00', type: 'Audio', status: 'Pending' },
-      { id: 'REQ-2043', patient: 'Casey Morgan', date: '2026-10-27', time: '14:00', type: 'Video', status: 'Accepted' }
-    ];
-    dialog.close();
+    session.doctor = null;
+    session.doctorProfile = null;
+    i18n.setLanguage(language.language);
+    document.querySelector('#doctor-login').hidden = true;
+    document.querySelector('#patient-portal').hidden = false;
     updateAccount();
-    updateDoctorAccount();
-    selectDoctorPanel('overview');
+    updateProfileForm();
+    selectPanel('doctors');
+    await loadAppointments();
+    return;
+  }
+  if (user.role === 'Doctor') {
+    const [profile, language] = await Promise.all([
+      apiRequest('doctors/me'),
+      apiRequest('profile/language')
+    ]);
+    session.patient = null;
+    session.doctorProfile = profile;
+    session.doctor = { name: profile?.fullName || user.email, email: user.email };
+    session.doctorCredentialStatus = profile?.verificationStatus || 'Pending';
+    i18n.setLanguage(language.language);
     document.querySelector('#patient-portal').hidden = true;
     document.querySelector('#doctor-login').hidden = false;
-    renderDoctorAppointments();
-    document.querySelector('#doctor-login').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    showToast('Doctor demo workspace opened. No account was authenticated.');
-  });
+    updateAccount();
+    updateDoctorAccount();
+    updateDoctorProfileForm();
+    selectDoctorPanel('overview');
+    return;
+  }
+  throw new Error('This account role does not have a portal interface.');
 }
 
 function updateDoctorAccount() {
   const account = document.querySelector('#doctor-account');
   const name = document.createElement('strong');
-  name.textContent = session.doctor?.name || 'Doctor demo';
+  name.textContent = session.doctor?.name || 'Doctor workspace';
   const email = document.createElement('small');
-  email.textContent = session.doctor?.email || 'Demo access only';
+  email.textContent = session.doctor?.email || 'Not signed in';
   const details = document.createElement('span');
   details.append(name, email);
   const avatar = document.createElement('span');
@@ -177,7 +229,37 @@ function updateDoctorAccount() {
   avatar.textContent = session.doctor?.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase() || 'D';
   account.replaceChildren(avatar, details);
   const greeting = document.querySelector('#doctor-overview-heading');
-  greeting.textContent = `Good day, ${session.doctor?.name || 'doctor'}`;
+  greeting.textContent = i18n.translate('Good day, {name}', { name: session.doctor?.name || 'doctor' });
+}
+
+function updateDoctorProfileForm() {
+  const form = document.querySelector('#doctor-profile-form');
+  if (!form || !session.doctorProfile) return;
+  form.elements.name.value = session.doctorProfile.fullName || '';
+  form.elements.specialty.value = session.doctorProfile.specialization || '';
+  form.elements.fee.value = session.doctorProfile.consultationFee ?? '';
+  form.elements.bio.value = session.doctorProfile.biography || '';
+}
+
+function formatRupees(amount) {
+  return `₹${amount.toLocaleString('en-IN')}`;
+}
+
+function updateDoctorEarnings(earnings) {
+  const count = Number(earnings?.paidPayments || 0);
+  const gross = formatRupees(Number(earnings?.grossPaise || 0) / 100);
+  const commission = formatRupees(Number(earnings?.commissionPaise || 0) / 100);
+  const net = formatRupees(Number(earnings?.earningsPaise || 0) / 100);
+  document.querySelector('#doctor-monthly-consultations').textContent = String(count);
+  document.querySelector('#doctor-report-consultations').textContent = String(count);
+  document.querySelector('#doctor-report-paid-payments').textContent = String(count);
+  document.querySelector('#doctor-net-earnings').textContent = net;
+  document.querySelector('#doctor-gross-fees').textContent = gross;
+  document.querySelector('#doctor-report-gross').textContent = gross;
+  document.querySelector('#doctor-platform-adjustments').textContent = commission;
+  document.querySelector('#doctor-report-adjustments').textContent = commission;
+  document.querySelector('#doctor-net-amount').textContent = net;
+  document.querySelector('#doctor-report-net-earnings').textContent = net;
 }
 
 function selectDoctorPanel(panelName) {
@@ -190,73 +272,129 @@ function selectDoctorPanel(panelName) {
   document.querySelectorAll('[id^="doctor-panel-"]').forEach((panel) => {
     panel.hidden = panel.id !== `doctor-panel-${panelName}`;
   });
-  if (panelName === 'appointments' || panelName === 'overview') renderDoctorAppointments();
-  if (panelName === 'credentials') {
-    document.querySelector('#credential-status').textContent = session.doctorCredentialStatus;
+  if (panelName === 'appointments' || panelName === 'overview') void loadDoctorAppointments().catch(showApiError);
+  if (panelName === 'availability') void loadDoctorAvailability().catch(showApiError);
+  if (panelName === 'credentials') void loadDoctorCredentials().catch(showApiError);
+  if (panelName === 'consultation') {
+    void renderDoctorHistory();
+    void loadPrescriptions().catch(showApiError);
   }
-  if (panelName === 'consultation') renderDoctorHistory();
+  if (panelName === 'overview' || panelName === 'reports') void loadDoctorEarnings().catch(showApiError);
+}
+
+async function loadDoctorAppointments() {
+  if (session.user?.role !== 'Doctor') return;
+  session.doctorAppointments = await apiRequest('doctors/appointments');
+  document.querySelector('#doctor-upcoming-count').textContent = String(
+    session.doctorAppointments.filter((appointment) =>
+      Date.parse(appointment.startAt) > Date.now() &&
+      ['PendingPayment', 'Confirmed'].includes(appointment.status)
+    ).length
+  );
+  renderDoctorAppointments();
+  updateClinicalAppointments();
+}
+
+async function loadDoctorEarnings() {
+  if (session.user?.role !== 'Doctor') return;
+  updateDoctorEarnings(await apiRequest('doctors/earnings'));
+}
+
+async function loadDoctorAvailability() {
+  if (session.user?.role !== 'Doctor' || !session.user.userId) return;
+  const from = new Date();
+  const to = new Date(from.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const params = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() });
+  session.doctorAvailability = await apiRequest(
+    `doctors/${encodeURIComponent(session.user.userId)}/availability?${params}`
+  );
+  const list = document.querySelector('#doctor-availability-list');
+  list.innerHTML = session.doctorAvailability.map((slot) => `
+    <article class="appointment-card">
+      <div class="appointment-date"><strong>${formatAppointmentDate(slot.startAt)}</strong><small>Until ${formatAppointmentDate(slot.endAt)}</small></div>
+      <div class="appointment-actions"><button type="button" class="text-action" data-availability-remove="${escapeHtml(slot.availabilityId)}">Remove</button></div>
+    </article>
+  `).join('') || '<p class="empty-state">No available appointment times in the next 30 days.</p>';
+}
+
+async function loadDoctorCredentials() {
+  if (session.user?.role !== 'Doctor') return;
+  const credentials = await apiRequest('doctors/credentials');
+  const status = session.doctorProfile?.verificationStatus || 'Pending';
+  document.querySelector('#credential-status').textContent =
+    `${i18n.translate(status)}${credentials.length ? ` · ${credentials.map((credential) => i18n.translate(credential.status)).join(', ')}` : ''}`;
+  session.doctorCredentialStatus = status;
 }
 
 function renderDoctorAppointments() {
-  const pending = session.doctorAppointments.filter((appointment) => appointment.status === 'Pending').length;
+  const pending = session.doctorAppointments.filter((appointment) => appointment.status === 'PendingPayment').length;
   document.querySelector('#pending-count').textContent = String(pending);
   const renderList = (appointments) => appointments.map((appointment) => `
     <article class="appointment-card doctor-appointment-card">
-      <div class="appointment-date"><span>${appointment.status} · sample request</span><strong>${formatAppointmentDate(appointment.date, appointment.time)}</strong><small>${appointment.type} consultation · reference ${appointment.id}</small></div>
-      <div class="appointment-doctor"><strong>${appointment.patient}</strong><span>Fictional patient</span><small>Sample appointment request</small></div>
+      <div class="appointment-date"><span>${escapeHtml(i18n.translate(appointment.status === 'PendingPayment' ? 'Pending payment' : appointment.status))}</span><strong>${formatAppointmentDate(appointment.startAt)}</strong><small>Reference ${escapeHtml(appointment.appointmentId)}</small></div>
+      <div class="appointment-doctor"><strong>${escapeHtml(appointment.patientName || 'Patient details unavailable')}</strong><span>${escapeHtml(i18n.translate(appointment.paymentStatus))}</span><small>${formatRupees(Number(appointment.feeAmount))}</small></div>
       <div class="appointment-actions">
-        ${appointment.status === 'Pending' ? `<button type="button" class="button button-primary button-small" data-doctor-appointment="accept" data-appointment-id="${appointment.id}">Accept</button><button type="button" class="text-action" data-doctor-appointment="reject" data-appointment-id="${appointment.id}">Reject</button>` : `<button type="button" class="button button-outline button-small" data-doctor-appointment="consult" data-appointment-id="${appointment.id}">Consultation preview</button>`}
+        ${appointment.status === 'PendingPayment' ? `<button type="button" class="text-action" data-doctor-appointment="reject" data-appointment-id="${appointment.appointmentId}">Reject request</button>` : ''}
+        ${appointment.status === 'Confirmed' && appointment.paymentStatus === 'Paid' && Date.parse(appointment.endAt) <= Date.now() ? `<button type="button" class="button button-outline button-small" data-doctor-appointment="complete" data-appointment-id="${appointment.appointmentId}">Mark completed</button>` : ''}
       </div>
     </article>
   `).join('');
-  document.querySelector('#doctor-appointment-list').innerHTML = renderList(session.doctorAppointments) || '<p class="empty-state">No sample appointment requests.</p>';
-  document.querySelector('#doctor-upcoming-list').innerHTML = renderList(session.doctorAppointments.slice(0, 2));
+  document.querySelector('#doctor-appointment-list').innerHTML = renderList(session.doctorAppointments) || '<p class="empty-state">No appointments are currently assigned to this account.</p>';
+  document.querySelector('#doctor-upcoming-list').innerHTML = renderList(session.doctorAppointments.filter((appointment) =>
+    Date.parse(appointment.startAt) > Date.now() &&
+    ['PendingPayment', 'Confirmed'].includes(appointment.status)
+  ).slice(0, 2)) || '<p class="empty-state">No upcoming appointments.</p>';
 }
 
-function renderDoctorHistory() {
+async function renderDoctorHistory() {
   const history = document.querySelector('#doctor-history-content');
-  if (!session.doctor) {
-    history.innerHTML = '<p class="empty-state">Doctor demo access is required.</p>';
-  } else if (!session.doctorRecordsAuthorized) {
-    history.innerHTML = '<p class="empty-state">Authorize access to view fictional patient history.</p>';
-  } else {
-    history.innerHTML = '<div class="recommendation-card"><strong>Authorized sample history · patient Sam Taylor</strong><ul><li>Previous sample consultation: routine primary care review.</li><li>Sample medication history: no details supplied.</li><li>All history is fictional and visible only during this doctor demo session.</li></ul></div>';
+  const appointmentId = document.querySelector('#clinical-appointment').value;
+  if (session.user?.role !== 'Doctor') {
+    history.innerHTML = '<p class="empty-state">Doctor workspace access is required.</p>';
+    return;
   }
-  document.querySelector('#doctor-records-authorized').checked = session.doctorRecordsAuthorized;
+  if (!appointmentId) {
+    history.innerHTML = '<p class="empty-state">Select an assigned, paid appointment to view authorized patient details.</p>';
+    return;
+  }
+  try {
+    const patient = await apiRequest(`doctors/appointments/${encodeURIComponent(appointmentId)}/patient`);
+    history.textContent = `Authorized patient: ${patient.fullName}`;
+  } catch (error) {
+    history.textContent = error instanceof Error ? error.message : 'Patient details could not be loaded.';
+  }
 }
 
-function renderClinicalItems() {
-  const container = document.querySelector('#clinical-items');
-  container.innerHTML = session.clinicalItems.map((item) => `
-    <article class="clinical-item">
-      <strong>Demo consultation saved · ${item.date}</strong>
-      <p><b>Notes:</b> ${escapeHtml(item.notes)}</p>
-      ${item.prescription ? `<p><b>Prescription draft:</b> ${escapeHtml(item.prescription)}</p>` : ''}
-      ${item.prescriptionStatus ? `<p><b>Status:</b> ${escapeHtml(item.prescriptionStatus)}</p>` : ''}
-      ${item.followup ? `<p><b>Follow-up:</b> ${escapeHtml(item.followup)}</p>` : ''}
-    </article>
+function updateClinicalAppointments() {
+  const select = document.querySelector('#clinical-appointment');
+  if (!select) return;
+  const eligible = session.doctorAppointments.filter((appointment) =>
+    appointment.paymentStatus === 'Paid' && ['Confirmed', 'Completed'].includes(appointment.status)
+  );
+  select.innerHTML = '<option value="">Select an assigned paid appointment</option>' + eligible.map((appointment) => `
+    <option value="${escapeHtml(appointment.appointmentId)}">${escapeHtml(appointment.patientName || 'Authorized patient')} · ${formatAppointmentDate(appointment.startAt)}</option>
   `).join('');
+}
+
+async function loadPrescriptions() {
+  if (session.user?.role !== 'Doctor') return;
+  const prescriptions = await apiRequest('prescriptions');
+  const container = document.querySelector('#clinical-items');
+  container.innerHTML = prescriptions.map((prescription) => `
+    <article class="clinical-item">
+      <strong>${formatAppointmentDate(prescription.createdAt)}</strong>
+      <p><b>Prescription:</b> ${escapeHtml(prescription.itemName)}</p>
+      <p><b>Dosage:</b> ${escapeHtml(prescription.dosage || '—')}</p>
+      <p><b>Frequency:</b> ${escapeHtml(prescription.frequency || '—')}</p>
+      <p><b>Duration:</b> ${escapeHtml(prescription.duration || '—')}</p>
+    </article>
+  `).join('') || '<p class="empty-state">No prescriptions are associated with your account.</p>';
 }
 
 function escapeHtml(value) {
   const element = document.createElement('span');
   element.textContent = value;
   return element.innerHTML;
-}
-
-function exitDoctorDemo() {
-  session.doctor = null;
-  session.doctorProfile = null;
-  session.clinicalItems = [];
-  session.doctorRecordsAuthorized = false;
-  session.doctorCredentialStatus = 'Not submitted in this demo session.';
-  session.doctorAvailability = null;
-  document.querySelector('#doctor-login').hidden = true;
-  document.querySelector('#patient-portal').hidden = false;
-  updateDoctorAccount();
-  selectPanel('doctors');
-  document.querySelector('#patient-portal').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  showToast('Doctor demo closed. The patient portal remains signed out.');
 }
 
 function updateAccount() {
@@ -291,6 +429,7 @@ function updateProfileForm() {
   form.elements.name.value = session.patient?.name || '';
   form.elements.email.value = session.patient?.email || '';
   form.elements.phone.value = session.patient?.phone || '';
+  form.elements.language.value = session.patient?.preferredLanguage || i18n.getLanguage();
   document.querySelector('#profile-message').textContent = '';
 }
 
@@ -304,22 +443,55 @@ function selectPanel(panelName) {
   document.querySelectorAll('#patient-portal .portal-panel').forEach((panel) => {
     panel.hidden = panel.id !== `panel-${panelName}`;
   });
-  if (panelName === 'appointments') renderAppointments();
-  if (panelName === 'records') renderRecords();
+  if (panelName === 'appointments') void loadAppointments().catch(showApiError);
+  if (panelName === 'records') void loadRecords().catch(showApiError);
   if (panelName === 'profile') updateProfileForm();
 }
 
-function renderDoctors(list = doctors) {
+function mapDoctor(record, index) {
+  const colors = ['teal', 'blue', 'lilac', 'peach'];
+  const name = record.fullName || '';
+  return {
+    id: record.doctorId,
+    name,
+    specialty: record.specialization || '',
+    bio: record.biography || '',
+    fee: Number(record.consultationFee),
+    initials: name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase(),
+    color: colors[index % colors.length]
+  };
+}
+
+async function loadDoctors(query = '') {
+  const params = new URLSearchParams();
+  if (query) params.set('q', query);
+  const result = await apiRequest(`doctors${params.size ? `?${params}` : ''}`);
+  const feeLimit = document.querySelector('#fee-filter').value;
+  session.doctors = result.map(mapDoctor).filter((doctor) => feeLimit === 'all' || doctor.fee <= Number(feeLimit));
+  renderDoctors();
+}
+
+async function loadAppointments() {
+  if (session.user?.role !== 'Patient') {
+    session.appointments = [];
+    renderAppointments();
+    return;
+  }
+  session.appointments = await apiRequest('appointments');
+  renderAppointments();
+}
+
+function renderDoctors(list = session.doctors) {
   const results = document.querySelector('#doctor-results');
   if (!list.length) {
-    results.innerHTML = '<p class="empty-state">No sample doctors match your search. Try a different name or specialty.</p>';
+    results.innerHTML = '<p class="empty-state">No verified doctors are currently available.</p>';
     return;
   }
   results.innerHTML = list.map((doctor) => `
     <article class="doctor-result">
-      <span class="doctor-avatar avatar-${doctor.color}" aria-hidden="true">${doctor.initials}</span>
-      <div class="doctor-details"><h4>${doctor.name}</h4><p>${doctor.specialty}</p><button type="button" class="text-action" data-doctor-action="view" data-doctor-id="${doctor.id}">View profile</button></div>
-      <div class="doctor-fee"><span>Consultation fee</span><strong>₹${doctor.fee.toLocaleString('en-IN')}</strong><button type="button" class="button button-primary button-small" data-doctor-action="book" data-doctor-id="${doctor.id}">Book</button></div>
+      <span class="doctor-avatar avatar-${doctor.color}" aria-hidden="true">${escapeHtml(doctor.initials)}</span>
+      <div class="doctor-details"><h4>${escapeHtml(doctor.name)}</h4><p>${escapeHtml(i18n.translate(doctor.specialty))}</p><button type="button" class="text-action" data-doctor-action="view" data-doctor-id="${escapeHtml(doctor.id)}">View profile</button></div>
+      <div class="doctor-fee"><span>Consultation fee</span><strong>${formatRupees(Number(doctor.fee))}</strong><button type="button" class="button button-primary button-small" data-doctor-action="availability" data-doctor-id="${escapeHtml(doctor.id)}">View availability</button></div>
     </article>
   `).join('');
 }
@@ -327,222 +499,333 @@ function renderDoctors(list = doctors) {
 function showDoctorProfile(doctor) {
   const content = elementFromHtml(`
     <div class="dialog-heading">
-      <span class="eyebrow">SAMPLE DOCTOR PROFILE</span>
-      <h2 id="dialog-title">${doctor.name}</h2>
-      <p>${doctor.specialty}</p>
+      <span class="eyebrow">VERIFIED DOCTOR PROFILE</span>
+      <h2 id="dialog-title">${escapeHtml(doctor.name)}</h2>
+      <p>${escapeHtml(i18n.translate(doctor.specialty))}</p>
     </div>
     <div class="doctor-profile">
       <span class="doctor-avatar avatar-${doctor.color}" aria-hidden="true">${doctor.initials}</span>
-      <p>${doctor.bio}</p>
-      <div class="profile-fee"><span>Sample consultation fee</span><strong>₹${doctor.fee.toLocaleString('en-IN')}</strong></div>
-      <button type="button" class="button button-primary" data-doctor-action="book" data-doctor-id="${doctor.id}">Schedule consultation</button>
+      <p>${escapeHtml(doctor.bio || '')}</p>
+      <div class="profile-fee"><span>Consultation fee</span><strong>${formatRupees(Number(doctor.fee))}</strong></div>
+      <button type="button" class="button button-primary" data-doctor-action="availability" data-doctor-id="${doctor.id}">View availability</button>
     </div>
   `);
   openDialog(content);
 }
 
-function showBookingDialog(doctor) {
+async function showDoctorAvailabilityDialog(doctor) {
   if (!requireSignIn()) return;
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const minDate = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`;
+  const from = new Date();
+  const to = new Date(from.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const params = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() });
+  let slots;
+  let checkoutEnabled;
+  try {
+    [slots, { checkoutEnabled }] = await Promise.all([
+      apiRequest(`doctors/${encodeURIComponent(doctor.id)}/availability?${params}`),
+      apiRequest('payments/config')
+    ]);
+  } catch (error) {
+    showApiError(error);
+    return;
+  }
+  const options = slots.map((slot) => `
+    <li><span>${formatAppointmentDate(slot.startAt)} – ${formatAppointmentDate(slot.endAt)}</span>
+      ${checkoutEnabled
+        ? `<button type="button" class="button button-primary button-small" data-book-slot="${escapeHtml(slot.availabilityId)}" data-doctor-id="${escapeHtml(doctor.id)}">Book and pay</button>`
+        : ''}
+    </li>
+  `).join('');
   const content = elementFromHtml(`
     <div class="dialog-heading">
-      <span class="eyebrow">SAMPLE BOOKING</span>
+      <span class="eyebrow">APPOINTMENT AVAILABILITY</span>
       <h2 id="dialog-title">Schedule a consultation</h2>
-      <p>Choose a time with ${doctor.name}. This demo does not confirm a real appointment.</p>
+      <p>Available times for ${escapeHtml(doctor.name)} are shown from the scheduling service.</p>
     </div>
-    <form class="dialog-form" id="booking-form">
-      <label>Appointment date<input name="date" type="date" min="${minDate}" required></label>
-      <label>Available time<select name="time" required><option value="">Choose a time</option><option>09:00</option><option>10:30</option><option>12:00</option><option>14:30</option><option>16:00</option></select></label>
-      <label>Consultation type<select name="type" required><option value="Video">Video consultation</option><option value="Audio">Audio consultation</option></select></label>
-      <div class="booking-fee"><span>Sample fee</span><strong>₹${doctor.fee.toLocaleString('en-IN')}</strong></div>
-      <p class="dialog-disclaimer">No payment is collected. Appointment slots and fees shown are illustrative only.</p>
-      <button class="button button-primary" type="submit">Confirm demo booking</button>
-    </form>
+    <div class="dialog-form">
+      ${slots.length
+        ? `<p>Available times</p><ul class="availability-options">${options}</ul>`
+        : '<p class="empty-state">No appointment times are available in the next 30 days.</p>'}
+      <div class="booking-fee"><span>Consultation fee</span><strong>${formatRupees(Number(doctor.fee))}</strong></div>
+      <p class="dialog-disclaimer">${checkoutEnabled
+        ? 'Payment is processed using Razorpay test checkout. The appointment is confirmed only after the server verifies payment.'
+        : 'Secure test checkout is not configured. No appointment can be reserved yet.'}</p>
+    </div>
   `);
   openDialog(content);
-  document.querySelector('#booking-form').addEventListener('submit', (event) => {
-    event.preventDefault();
-    const booking = new FormData(event.currentTarget);
-    const appointmentDate = new Date(`${booking.get('date')}T${booking.get('time')}`);
-    if (Number.isNaN(appointmentDate.getTime()) || appointmentDate <= new Date()) {
-      showToast('Choose a future date and time.');
-      return;
-    }
-    session.appointments.unshift({
-      id: `DEMO-${Date.now().toString(36).toUpperCase()}`,
-      doctor,
-      date: String(booking.get('date')),
-      time: String(booking.get('time')),
-      type: String(booking.get('type')),
-      fee: doctor.fee
-    });
-    dialog.close();
-    selectPanel('appointments');
-    showToast('Demo booking added to your appointment list.');
-    document.querySelector('#patient-portal').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function loadRazorpayCheckout() {
+  if (window.Razorpay) return Promise.resolve();
+  if (razorpayScriptPromise) return razorpayScriptPromise;
+  razorpayScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    const timeout = window.setTimeout(() => {
+      script.remove();
+      razorpayScriptPromise = undefined;
+      reject(new Error('Razorpay checkout did not load. Please try again.'));
+    }, 15000);
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.referrerPolicy = 'strict-origin';
+    script.onload = () => {
+      window.clearTimeout(timeout);
+      if (window.Razorpay) resolve();
+      else {
+        razorpayScriptPromise = undefined;
+        reject(new Error('Razorpay checkout could not be initialized.'));
+      }
+    };
+    script.onerror = () => {
+      window.clearTimeout(timeout);
+      script.remove();
+      razorpayScriptPromise = undefined;
+      reject(new Error('Razorpay checkout could not be reached.'));
+    };
+    document.head.append(script);
   });
+  return razorpayScriptPromise;
+}
+
+async function startAppointmentCheckout(doctor, availabilityId, button) {
+  if (!requireSignIn()) return;
+  button.disabled = true;
+  let appointment;
+  try {
+    await loadRazorpayCheckout();
+    appointment = await apiRequest('appointments', {
+      method: 'POST',
+      body: { doctorId: doctor.id, availabilityId }
+    });
+    await openRazorpayCheckout(appointment.appointmentId, doctor.name);
+  } catch (error) {
+    if (appointment?.appointmentId) {
+      try {
+        await apiRequest(`appointments/${encodeURIComponent(appointment.appointmentId)}`, { method: 'DELETE' });
+      } catch (cleanupError) {
+        const primary = error instanceof Error ? error.message : 'Checkout could not be started.';
+        const cleanup = cleanupError instanceof Error ? cleanupError.message : 'The pending appointment could not be cancelled.';
+        showToast(`${primary} ${cleanup}`);
+        return;
+      }
+    }
+    button.disabled = false;
+    showApiError(error);
+  }
+}
+
+async function resumeAppointmentCheckout(appointment, button) {
+  button.disabled = true;
+  try {
+    await loadRazorpayCheckout();
+    await openRazorpayCheckout(appointment.appointmentId, appointment.doctorName);
+  } catch (error) {
+    button.disabled = false;
+    showApiError(error);
+  }
+}
+
+async function openRazorpayCheckout(appointmentId, doctorName) {
+  const order = await apiRequest('payments/orders', {
+    method: 'POST',
+    body: { appointmentId }
+  });
+  const checkout = new window.Razorpay({
+    key: order.keyId,
+    amount: order.amount,
+    currency: order.currency,
+    name: 'Sonic A Square B Solutions',
+    description: `Consultation with ${doctorName}`,
+    order_id: order.orderId,
+    handler: async (payment) => {
+      try {
+        await apiRequest('payments/verify', {
+          method: 'POST',
+          body: {
+            orderId: payment.razorpay_order_id,
+            paymentId: payment.razorpay_payment_id,
+            signature: payment.razorpay_signature
+          }
+        });
+        dialog.close();
+        await loadAppointments();
+        selectPanel('appointments');
+        showToast('Payment verified. Your appointment is confirmed.');
+      } catch (error) {
+        showApiError(error);
+        await loadAppointments().catch(showApiError);
+      }
+    },
+    modal: {
+      ondismiss: () => {
+        showToast('Checkout closed. Appointment status will update when the provider confirms the payment result.');
+        void loadAppointments().catch(showApiError);
+      }
+    },
+    theme: { color: '#167b79' }
+  });
+  checkout.on('payment.failed', () => {
+    showToast('Payment could not be completed. Appointment status is awaiting provider confirmation.');
+    void loadAppointments().catch(showApiError);
+  });
+  checkout.open();
 }
 
 function formatAppointmentDate(date, time) {
-  return new Date(`${date}T${time}`).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const locale = i18n.getLanguage() === 'te' ? 'te-IN' : 'en-IN';
+  const value = time ? `${date}T${time}` : date;
+  return new Date(value).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 function renderAppointments() {
   const container = document.querySelector('#appointment-list');
-  if (!session.patient) {
+  if (session.user?.role !== 'Patient') {
     container.innerHTML = '<p class="empty-state">Sign in to view your appointments.</p>';
     return;
   }
   const items = session.appointments.map((appointment) => `
     <article class="appointment-card">
-      <div class="appointment-date"><span>${appointment.type} consultation</span><strong>${formatAppointmentDate(appointment.date, appointment.time)}</strong><small>Sample fee: ₹${appointment.fee.toLocaleString('en-IN')}</small></div>
-      <div class="appointment-doctor"><strong>${appointment.doctor.name}</strong><span>${appointment.doctor.specialty}</span><small>Reference: ${appointment.id}</small></div>
+      <div class="appointment-date"><span>${escapeHtml(i18n.translate(appointment.status === 'PendingPayment' ? 'Pending payment' : appointment.status))} · ${escapeHtml(i18n.translate(appointment.paymentStatus))}</span><strong>${formatAppointmentDate(appointment.startAt)}</strong><small>${formatRupees(Number(appointment.feeAmount))}</small></div>
+      <div class="appointment-doctor"><strong>${escapeHtml(appointment.doctorName)}</strong><small>Reference: ${escapeHtml(appointment.appointmentId)}</small></div>
       <div class="appointment-actions">
-        <button type="button" class="button button-primary button-small" data-appointment-action="join" data-appointment-id="${appointment.id}">Join ${appointment.type.toLowerCase()} visit</button>
-        <button type="button" class="text-action" data-appointment-action="confirmation" data-appointment-id="${appointment.id}">Download confirmation</button>
-        <button type="button" class="text-action" data-appointment-action="receipt" data-appointment-id="${appointment.id}">Download receipt</button>
+        ${appointment.status === 'PendingPayment' && appointment.paymentStatus === 'Pending' && appointment.hasPaymentOrder
+          ? `<button type="button" class="text-action" data-appointment-action="pay" data-appointment-id="${escapeHtml(appointment.appointmentId)}">Continue payment</button>`
+          : ''}
+        ${appointment.status === 'PendingPayment' && appointment.paymentStatus === 'Pending' && !appointment.hasPaymentOrder
+          ? `<button type="button" class="text-action" data-appointment-action="cancel" data-appointment-id="${escapeHtml(appointment.appointmentId)}">Cancel reservation</button>`
+          : ''}
+        ${appointment.status === 'Confirmed' && appointment.paymentStatus === 'Paid' && Date.now() >= Date.parse(appointment.startAt) && Date.now() <= Date.parse(appointment.endAt) ? `<button type="button" class="button button-primary button-small" data-appointment-action="join" data-appointment-id="${escapeHtml(appointment.appointmentId)}">Join consultation</button>` : ''}
       </div>
     </article>
   `).join('');
-  const history = `
-    <h4 class="subsection-title">Appointment history</h4>
-    <article class="appointment-card history-card">
-      <div class="appointment-date"><span>Completed · Sample history</span><strong>September 18, 2026 · 10:30 AM</strong><small>Video consultation</small></div>
-      <div class="appointment-doctor"><strong>Dr. Maya Shah</strong><span>General physician</span><small>Follow-up: Routine check-in if symptoms continue.</small></div>
-      <div class="appointment-actions"><button type="button" class="text-action" data-appointment-action="sample-confirmation">Download sample confirmation</button><button type="button" class="text-action" data-appointment-action="sample-receipt">Download sample receipt</button></div>
-    </article>`;
-  container.innerHTML = `${items || '<p class="empty-state">No demo bookings yet. Browse doctors to schedule a sample consultation.</p>'}${history}`;
+  container.innerHTML = items || '<p class="empty-state">No appointments are associated with this account.</p>';
 }
 
-function renderRecords() {
+async function loadRecords() {
+  if (session.user?.role !== 'Patient') {
+    renderRecords([], []);
+    return;
+  }
+  const [records, prescriptions] = await Promise.all([
+    apiRequest('medical-records'),
+    apiRequest('prescriptions')
+  ]);
+  renderRecords(records, prescriptions);
+}
+
+function renderRecords(records, prescriptions = []) {
   const content = document.querySelector('#records-content');
-  const authorization = document.querySelector('#records-authorized');
-  authorization.checked = session.recordsAuthorized;
-  if (!session.patient) {
-    authorization.disabled = true;
-    content.innerHTML = '<p class="empty-state">Sign in to access the sample records area.</p>';
+  if (!session.user || session.user.role !== 'Patient') {
+    content.innerHTML = '<p class="empty-state">Sign in with a patient account to access your records.</p>';
     return;
   }
-  authorization.disabled = false;
-  if (!session.recordsAuthorized) {
-    content.innerHTML = '<p class="empty-state">Authorize access to view sample documents and recommendations.</p>';
+  if (!records.length && !prescriptions.length) {
+    content.innerHTML = '<p class="empty-state">No medical records are associated with this account.</p>';
     return;
   }
+  const documents = records.map((record) => `
+    <article class="record-card">
+      <span class="record-icon" aria-hidden="true">+</span>
+      <div><strong>${escapeHtml(record.fileName)}</strong><span>${escapeHtml(record.recordType)} · ${formatAppointmentDate(record.createdAt)}</span></div>
+      <button class="text-action" type="button" data-record-download="${escapeHtml(record.medicalRecordId)}">Download</button>
+    </article>
+  `).join('');
+  const prescribedItems = prescriptions.map((prescription) => `
+    <article class="clinical-item">
+      <strong>${formatAppointmentDate(prescription.createdAt)}</strong>
+      <p><b>${escapeHtml(prescription.itemName)}</b></p>
+      <p>${escapeHtml(prescription.dosage || '—')} · ${escapeHtml(prescription.frequency || '—')} · ${escapeHtml(prescription.duration || '—')}</p>
+      ${prescription.itemInstructions || prescription.instructions
+        ? `<p>${escapeHtml(prescription.itemInstructions || prescription.instructions)}</p>`
+        : ''}
+    </article>
+  `).join('');
   content.innerHTML = `
-    <h4 class="subsection-title">Authorized sample documents</h4>
-    <div class="record-card"><span class="record-icon" aria-hidden="true">Rx</span><div><strong>Sample prescription</strong><span>Dr. Maya Shah · September 18, 2026</span></div><button class="text-action" type="button" data-record-download="prescription">Download</button></div>
-    <div class="record-card"><span class="record-icon" aria-hidden="true">+</span><div><strong>Sample consultation summary</strong><span>Fictional medical document · September 18, 2026</span></div><button class="text-action" type="button" data-record-download="medical">Download</button></div>
-    <div class="recommendation-card"><strong>Follow-up recommendations · sample</strong><ul><li>Keep a note of questions to discuss at your next visit.</li><li>Arrange a follow-up with a qualified clinician if your symptoms continue.</li><li>Seek urgent local medical care for severe or rapidly worsening symptoms.</li></ul></div>
+    ${documents ? `<section><h4>Medical documents</h4>${documents}</section>` : ''}
+    ${prescribedItems ? `<section><h4>Prescriptions</h4>${prescribedItems}</section>` : ''}
   `;
 }
 
-function downloadText(filename, text) {
-  const file = new Blob([text], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(file);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  link.hidden = true;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function downloadAppointment(appointment, kind) {
-  const label = kind === 'receipt' ? 'SAMPLE RECEIPT' : 'SAMPLE APPOINTMENT CONFIRMATION';
-  const contents = [
-    'SONIC HEALTHCARE — DEMONSTRATION ONLY',
-    label,
-    'Not a real booking, payment receipt, or medical document.',
-    `Patient: ${session.patient.name}`,
-    `Doctor: ${appointment.doctor.name} (${appointment.doctor.specialty})`,
-    `Date: ${formatAppointmentDate(appointment.date, appointment.time)}`,
-    `Consultation: ${appointment.type}`,
-    `Sample fee: ₹${appointment.fee.toLocaleString('en-IN')}`,
-    `Reference: ${appointment.id}`
-  ].join('\n');
-  downloadText(`${kind}-${appointment.id.toLowerCase()}.txt`, contents);
-}
-
-function showConsultationNotice(type) {
-  const content = elementFromHtml(`
-    <div class="dialog-heading">
-      <span class="eyebrow">CONSULTATION PREVIEW</span>
-      <h2 id="dialog-title">${type} consultation</h2>
-      <p>Telehealth is not connected in this prototype. No call, microphone, or camera session has been started.</p>
-    </div>
-    <div class="call-preview"><span aria-hidden="true">${type === 'Video' ? '▣' : '◖'}</span><strong>Ready for your clinician</strong><p>A secure, provider-connected consultation service is needed to join a real appointment.</p></div>
-  `);
-  openDialog(content);
-}
-
-document.addEventListener('click', (event) => {
+document.addEventListener('click', async (event) => {
   const doctorAccess = event.target.closest('[data-doctor-access]');
   if (doctorAccess) {
     event.preventDefault();
-    if (session.doctor) {
+    if (session.user?.role === 'Doctor') {
       document.querySelector('#doctor-login').hidden = false;
       document.querySelector('#patient-portal').hidden = true;
       document.querySelector('#doctor-login').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } else {
-      showDoctorAuthDialog();
+      showAuthDialog('login', 'Doctor');
     }
     return;
   }
   if (event.target.closest('[data-doctor-signout]')) {
-    exitDoctorDemo();
-    return;
-  }
-  const doctorPanelButton = event.target.closest('[data-doctor-panel], [data-open-doctor-panel]');
-  if (doctorPanelButton) {
-    const panelName = doctorPanelButton.dataset.doctorPanel || doctorPanelButton.dataset.openDoctorPanel;
-    selectDoctorPanel(panelName);
-    return;
-  }
-  const doctorAppointmentButton = event.target.closest('[data-doctor-appointment]');
-  if (doctorAppointmentButton && session.doctor) {
-    const appointment = session.doctorAppointments.find((item) => item.id === doctorAppointmentButton.dataset.appointmentId);
-    if (!appointment) return;
-    const action = doctorAppointmentButton.dataset.doctorAppointment;
-    if (action === 'accept' || action === 'reject') {
-      appointment.status = action === 'accept' ? 'Accepted' : 'Declined';
-      renderDoctorAppointments();
-      showToast(`Sample appointment ${action === 'accept' ? 'accepted' : 'declined'}.`);
-    } else {
-      selectDoctorPanel('consultation');
-      showToast('Consultation preview only; no call or patient data is connected.');
+    try {
+      await apiRequest('auth/logout', { method: 'POST' });
+      clearAuthenticatedAccount();
+      showToast('You are signed out.');
+    } catch (error) {
+      showApiError(error);
     }
     return;
   }
-  const doctorCallButton = event.target.closest('[data-doctor-call]');
-  if (doctorCallButton && session.doctor) {
-    const type = doctorCallButton.dataset.doctorCall;
-    const content = elementFromHtml(`<div class="dialog-heading"><span class="eyebrow">CONSULTATION PREVIEW</span><h2 id="dialog-title">${type} consultation</h2><p>No call, microphone, or camera is connected in this prototype.</p></div><div class="call-preview"><strong>Secure telehealth integration required</strong><p>This screen is a visual preview only.</p></div>`);
-    openDialog(content);
+  const doctorPanelButton = event.target.closest('[data-open-doctor-panel]');
+  if (doctorPanelButton) {
+    const panelName = doctorPanelButton.dataset.openDoctorPanel;
+    if (session.user?.role === 'Doctor') selectDoctorPanel(panelName);
+    else showAuthDialog('login', 'Doctor');
+    return;
+  }
+  const doctorAppointmentButton = event.target.closest('[data-doctor-appointment]');
+  if (doctorAppointmentButton && session.user?.role === 'Doctor') {
+    const action = doctorAppointmentButton.dataset.doctorAppointment;
+    if (action === 'reject' || action === 'complete') {
+      try {
+        await apiRequest(`doctors/appointments/${encodeURIComponent(doctorAppointmentButton.dataset.appointmentId)}/status`, {
+          method: 'PATCH',
+          body: { status: action === 'reject' ? 'Rejected' : 'Completed' }
+        });
+        await loadDoctorAppointments();
+      } catch (error) {
+        showApiError(error);
+      }
+    }
     return;
   }
   const control = event.target.closest('[data-auth-action]');
   if (!control) return;
   const action = control.dataset.authAction;
   if (action === 'logout') {
-    session.patient = null;
-    session.appointments = [];
-    session.uploadedFiles = [];
-    session.recordsAuthorized = false;
-    updateAccount();
-    selectPanel('doctors');
-    renderRecords();
-    renderAppointments();
-    document.querySelector('#uploaded-files').replaceChildren();
-    showToast('You have signed out of the demo session.');
+    try {
+      await apiRequest('auth/logout', { method: 'POST' });
+      clearAuthenticatedAccount();
+      showToast('You are signed out.');
+    } catch (error) {
+      showApiError(error);
+    }
     return;
   }
   if (control.tagName === 'A') event.preventDefault();
   showAuthDialog(action);
 });
+
+function clearAuthenticatedAccount() {
+  session.user = null;
+  session.patient = null;
+  session.doctor = null;
+  session.doctorProfile = null;
+  session.appointments = [];
+  session.doctorAppointments = [];
+  session.doctorAvailability = [];
+  session.doctorCredentialStatus = '';
+  document.querySelector('#doctor-login').hidden = true;
+  document.querySelector('#patient-portal').hidden = false;
+  updateAccount();
+  updateDoctorAccount();
+  selectPanel('doctors');
+  renderAppointments();
+  renderRecords([]);
+}
 
 document.querySelectorAll('#patient-portal .portal-tab').forEach((tab) => {
   tab.addEventListener('click', () => {
@@ -554,179 +837,279 @@ document.querySelectorAll('#patient-portal .portal-tab').forEach((tab) => {
 
 document.querySelector('#doctor-search').addEventListener('submit', (event) => {
   event.preventDefault();
-  const query = document.querySelector('#doctor-query').value.trim().toLocaleLowerCase();
-  const feeLimit = document.querySelector('#fee-filter').value;
-  const matches = doctors.filter((doctor) => {
-    const matchesText = `${doctor.name} ${doctor.specialty}`.toLocaleLowerCase().includes(query);
-    const matchesFee = feeLimit === 'all' || doctor.fee <= Number(feeLimit);
-    return matchesText && matchesFee;
-  });
-  renderDoctors(matches);
+  void loadDoctors(document.querySelector('#doctor-query').value.trim()).catch(showApiError);
+});
+
+document.querySelector('#fee-filter').addEventListener('change', () => {
+  void loadDoctors(document.querySelector('#doctor-query').value.trim()).catch(showApiError);
 });
 
 document.querySelector('#doctor-results').addEventListener('click', (event) => {
   const actionButton = event.target.closest('[data-doctor-action]');
   if (!actionButton) return;
-  const doctor = doctors.find((item) => item.id === actionButton.dataset.doctorId);
+  const doctor = session.doctors.find((item) => item.id === actionButton.dataset.doctorId);
   if (!doctor) return;
   if (actionButton.dataset.doctorAction === 'view') showDoctorProfile(doctor);
-  if (actionButton.dataset.doctorAction === 'book') showBookingDialog(doctor);
+  if (actionButton.dataset.doctorAction === 'availability') void showDoctorAvailabilityDialog(doctor);
 });
 
 dialogContent.addEventListener('click', (event) => {
+  const slotButton = event.target.closest('[data-book-slot]');
+  if (slotButton) {
+    const doctor = session.doctors.find((item) => item.id === slotButton.dataset.doctorId);
+    if (doctor) void startAppointmentCheckout(doctor, slotButton.dataset.bookSlot, slotButton);
+    return;
+  }
   const actionButton = event.target.closest('[data-doctor-action]');
-  if (!actionButton || actionButton.dataset.doctorAction !== 'book') return;
-  const doctor = doctors.find((item) => item.id === actionButton.dataset.doctorId);
-  if (doctor) showBookingDialog(doctor);
+  if (!actionButton || actionButton.dataset.doctorAction !== 'availability') return;
+  const doctor = session.doctors.find((item) => item.id === actionButton.dataset.doctorId);
+  if (doctor) void showDoctorAvailabilityDialog(doctor);
 });
 
-document.querySelector('#appointment-list').addEventListener('click', (event) => {
+document.querySelector('#appointment-list').addEventListener('click', async (event) => {
   const button = event.target.closest('[data-appointment-action]');
   if (!button) return;
   const action = button.dataset.appointmentAction;
-  if (action.startsWith('sample-')) {
-    const type = action === 'sample-receipt' ? 'receipt' : 'confirmation';
-    downloadText(`sample-${type}.txt`, `SONIC HEALTHCARE — DEMONSTRATION ONLY\nSAMPLE ${type.toUpperCase()}\nFictional appointment for Dr. Maya Shah.\nSeptember 18, 2026 · 10:30 AM\nNot a real booking, medical document, or payment receipt.`);
+  const appointmentId = button.dataset.appointmentId;
+  if (action === 'pay') {
+    const appointment = session.appointments.find((item) => item.appointmentId === appointmentId);
+    if (appointment) await resumeAppointmentCheckout(appointment, button);
     return;
   }
-  const appointment = session.appointments.find((item) => item.id === button.dataset.appointmentId);
-  if (!appointment) return;
-  if (action === 'join') showConsultationNotice(appointment.type);
-  if (action === 'confirmation' || action === 'receipt') downloadAppointment(appointment, action);
+  if (action === 'cancel') {
+    try {
+      await apiRequest(`appointments/${encodeURIComponent(appointmentId)}`, { method: 'DELETE' });
+      await loadAppointments();
+    } catch (error) {
+      showApiError(error);
+    }
+    return;
+  }
+  if (action === 'join') {
+    const popup = window.open('about:blank', '_blank');
+    if (popup) popup.opener = null;
+    try {
+      const result = await apiRequest(`consultations/${encodeURIComponent(appointmentId)}/join`, { method: 'POST' });
+      const joinUrl = new URL(result.joinUrl);
+      if (joinUrl.protocol !== 'https:') throw new Error('The consultation service returned an insecure link.');
+      if (popup) popup.location.href = joinUrl.href;
+      else showToast('Allow pop-ups to open the secure consultation link.');
+    } catch (error) {
+      popup?.close();
+      showApiError(error);
+    }
+  }
 });
 
-document.querySelector('#records-authorized').addEventListener('change', (event) => {
-  session.recordsAuthorized = event.currentTarget.checked;
-  renderRecords();
-});
-
-document.querySelector('#records-content').addEventListener('click', (event) => {
+document.querySelector('#records-content').addEventListener('click', async (event) => {
   const button = event.target.closest('[data-record-download]');
-  if (!button || !session.patient || !session.recordsAuthorized) return;
-  if (button.dataset.recordDownload === 'prescription') {
-    downloadText('sample-prescription.txt', 'SONIC HEALTHCARE — FICTIONAL SAMPLE PRESCRIPTION\nDemonstration only. Not medical advice or a valid prescription.\nPatient: Sample patient\nClinician: Dr. Maya Shah\nDate: September 18, 2026\nFor real medication advice, consult a qualified clinician.');
-  } else {
-    downloadText('sample-medical-document.txt', 'SONIC HEALTHCARE — FICTIONAL MEDICAL DOCUMENT\nDemonstration only. This is not a real medical record.\nConsultation summary: Sample primary care visit.\nFollow-up: Consult a qualified clinician for personalized care.');
+  if (!button || session.user?.role !== 'Patient') return;
+  const popup = window.open('about:blank', '_blank');
+  if (popup) popup.opener = null;
+  try {
+    const result = await apiRequest(`medical-records/${encodeURIComponent(button.dataset.recordDownload)}/url`);
+    const downloadUrl = new URL(result.url);
+    if (downloadUrl.protocol !== 'https:') throw new Error('The document service returned an insecure link.');
+    if (popup) popup.location.href = downloadUrl.href;
+    else showToast('Allow pop-ups to open the secure document.');
+  } catch (error) {
+    popup?.close();
+    showApiError(error);
   }
 });
 
-document.querySelector('#document-upload').addEventListener('submit', (event) => {
-  event.preventDefault();
-  if (!requireSignIn()) return;
-  const input = document.querySelector('#medical-document');
-  const file = input.files[0];
-  if (!file) {
-    showToast('Choose a document before adding it.');
-    return;
-  }
-  if (file.size > 10 * 1024 * 1024) {
-    showToast('Choose a file smaller than 10 MB.');
-    return;
-  }
-  if (session.uploadedFiles.some((name) => name === file.name)) {
-    showToast('That filename is already in your demo list.');
-    return;
-  }
-  session.uploadedFiles.push(file.name);
-  const item = document.createElement('li');
-  item.textContent = `${file.name} — filename added for this session only; contents were not uploaded.`;
-  document.querySelector('#uploaded-files').append(item);
-  input.value = '';
-  showToast('Filename added. No document data was uploaded.');
-});
-
-document.querySelector('#profile-form').addEventListener('submit', (event) => {
+document.querySelector('#profile-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!requireSignIn()) return;
   const form = event.currentTarget;
-  session.patient = {
-    name: form.elements.name.value.trim(),
-    email: form.elements.email.value.trim(),
-    phone: form.elements.phone.value.trim()
-  };
-  updateAccount();
-  document.querySelector('#profile-message').textContent = 'Profile updated for this demo session only.';
+  const message = document.querySelector('#profile-message');
+  try {
+    const language = form.elements.language.value;
+    const profile = await apiRequest('patients/me', {
+      method: 'PATCH',
+      body: {
+        fullName: form.elements.name.value.trim(),
+        phone: form.elements.phone.value.trim() || null
+      }
+    });
+    await apiRequest('profile/language', { method: 'PATCH', body: { language } });
+    session.patient = {
+      name: profile.fullName,
+      email: profile.email,
+      phone: profile.phone || '',
+      preferredLanguage: language
+    };
+    i18n.setLanguage(language);
+    updateAccount();
+    message.textContent = 'Your account profile was updated.';
+  } catch (error) {
+    message.textContent = error instanceof Error ? error.message : 'Your profile could not be updated.';
+  }
 });
 
 document.querySelectorAll('[data-doctor-panel]').forEach((tab) => {
   tab.addEventListener('click', () => {
-    if (session.doctor) selectDoctorPanel(tab.dataset.doctorPanel);
+    if (session.user?.role === 'Doctor') selectDoctorPanel(tab.dataset.doctorPanel);
   });
 });
 
-document.querySelector('#doctor-availability-form').addEventListener('submit', (event) => {
+document.querySelector('#doctor-availability-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (!session.doctor) return;
+  if (session.user?.role !== 'Doctor') return;
   const form = event.currentTarget;
-  const days = [...form.querySelectorAll('input[name="day"]:checked')].map((input) => input.value);
-  if (!days.length || form.elements.start.value >= form.elements.end.value) {
-    showToast('Select at least one day and a valid time range.');
+  const startAt = form.elements.startAt.value;
+  const endAt = form.elements.endAt.value;
+  if (!startAt || !endAt || Date.parse(endAt) <= Date.parse(startAt)) {
+    showToast('Choose a valid future start and end time.');
     return;
   }
-  session.doctorAvailability = { days, start: form.elements.start.value, end: form.elements.end.value };
-  document.querySelector('#availability-message').textContent = `Sample availability saved: ${days.join(', ')}.`;
+  try {
+    await apiRequest('doctors/availability', {
+      method: 'POST',
+      body: { startAt: new Date(startAt).toISOString(), endAt: new Date(endAt).toISOString() }
+    });
+    form.reset();
+    document.querySelector('#availability-message').textContent = 'Appointment time added to your account.';
+    await loadDoctorAvailability();
+  } catch (error) {
+    document.querySelector('#availability-message').textContent =
+      error instanceof Error ? error.message : 'Availability could not be saved.';
+  }
 });
 
-document.querySelector('#doctor-profile-form').addEventListener('submit', (event) => {
+document.querySelector('#doctor-availability-list').addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-availability-remove]');
+  if (!button || session.user?.role !== 'Doctor') return;
+  try {
+    await apiRequest(`doctors/availability/${encodeURIComponent(button.dataset.availabilityRemove)}`, { method: 'DELETE' });
+    await loadDoctorAvailability();
+  } catch (error) {
+    showApiError(error);
+  }
+});
+
+document.querySelector('#doctor-profile-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (!session.doctor) return;
+  if (session.user?.role !== 'Doctor') return;
   const form = event.currentTarget;
-  session.doctorProfile = {
-    name: form.elements.name.value.trim(),
-    specialty: form.elements.specialty.value.trim(),
-    experience: Number(form.elements.experience.value),
-    fee: Number(form.elements.fee.value),
-    bio: form.elements.bio.value.trim()
-  };
-  session.doctor.name = session.doctorProfile.name;
-  updateDoctorAccount();
-  document.querySelector('#doctor-profile-message').textContent = 'Professional profile updated for this demo session only.';
+  try {
+    session.doctorProfile = await apiRequest('doctors/me', {
+      method: 'PATCH',
+      body: {
+        fullName: form.elements.name.value.trim(),
+        specialization: form.elements.specialty.value.trim() || null,
+        consultationFee: form.elements.fee.value ? Number(form.elements.fee.value) : null,
+        biography: form.elements.bio.value.trim() || null
+      }
+    });
+    session.doctor.name = session.doctorProfile.fullName;
+    updateDoctorAccount();
+    document.querySelector('#doctor-profile-message').textContent = 'Professional profile updated.';
+  } catch (error) {
+    document.querySelector('#doctor-profile-message').textContent =
+      error instanceof Error ? error.message : 'Professional profile could not be saved.';
+  }
 });
 
-document.querySelector('#credential-form').addEventListener('submit', (event) => {
+document.querySelector('#clinical-appointment').addEventListener('change', () => {
+  void renderDoctorHistory();
+});
+
+document.querySelector('#clinical-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (!session.doctor) return;
-  const file = event.currentTarget.elements['credential-file'].files[0];
-  session.doctorCredentialStatus = `Sample details submitted${file ? ` (${file.name})` : ''}. Verification is not performed.`;
-  document.querySelector('#credential-status').textContent = session.doctorCredentialStatus;
-  document.querySelector('#credential-message').textContent = 'Demo submission recorded in this page only; no verification was performed.';
-});
-
-document.querySelector('#doctor-records-authorized').addEventListener('change', (event) => {
-  if (!session.doctor) return;
-  session.doctorRecordsAuthorized = event.currentTarget.checked;
-  renderDoctorHistory();
-});
-
-document.querySelector('#clinical-form').addEventListener('submit', (event) => {
-  event.preventDefault();
-  if (!session.doctor || !session.doctorRecordsAuthorized) {
-    showToast('Authorize sample patient history before saving consultation details.');
+  if (session.user?.role !== 'Doctor') {
+    showToast('Sign in with a doctor account to continue.');
     return;
   }
   const form = event.currentTarget;
-  const action = event.submitter?.value || 'save';
-  const prescription = form.elements.prescription.value.trim();
-  if (action === 'prescription' && !prescription) {
-    showToast('Add prescription details before issuing a demo prescription.');
+  const appointmentId = form.elements.appointmentId.value;
+  const itemName = form.elements.itemName.value.trim();
+  if (!appointmentId || !itemName) {
+    showToast('Select an authorized appointment and enter the prescribed item.');
     return;
   }
-  session.clinicalItems.unshift({
-    date: new Date().toLocaleDateString(),
-    notes: form.elements.notes.value.trim(),
-    prescription,
-    prescriptionStatus: action === 'prescription' ? 'Demo prescription · not valid for dispensing' : (prescription ? 'Prescription draft · not issued' : ''),
-    followup: form.elements.followup.value.trim()
-  });
-  form.reset();
-  renderClinicalItems();
-  document.querySelector('#clinical-message').textContent = action === 'prescription'
-    ? 'Demo prescription preview created in this page session only; it is not valid for dispensing.'
-    : 'Demo consultation saved in this page session only.';
-  showToast(action === 'prescription'
-    ? 'Demo prescription preview created. It is not a valid prescription.'
-    : 'Demo consultation saved. No real record or prescription was issued.');
+  try {
+    await apiRequest('prescriptions', {
+      method: 'POST',
+      body: {
+        appointmentId,
+        items: [{
+          itemName,
+          dosage: form.elements.dosage.value.trim() || null,
+          frequency: form.elements.frequency.value.trim() || null,
+          duration: form.elements.duration.value.trim() || null,
+          instructions: form.elements.instructions.value.trim() || null
+        }]
+      }
+    });
+    form.reset();
+    document.querySelector('#clinical-message').textContent = 'Prescription was recorded for the authorized appointment.';
+    await loadPrescriptions();
+  } catch (error) {
+    document.querySelector('#clinical-message').textContent =
+      error instanceof Error ? error.message : 'Prescription could not be recorded.';
+  }
 });
 
-renderDoctors();
+i18n.initialize();
 updateAccount();
+updateDoctorAccount();
+renderAppointments();
+renderRecords([]);
+void loadDoctors().catch(showApiError);
+
+async function restoreAccount() {
+  try {
+    const result = await apiRequest('auth/me');
+    await openAuthenticatedAccount(result.user);
+  } catch (error) {
+    if (!(error instanceof ApiRequestError) || error.status !== 401) showApiError(error);
+  }
+}
+
+void restoreAccount();
+
+window.addEventListener('sonic-language-change', (event) => {
+  const language = event.detail.language;
+  const preferenceChanged = Boolean(session.user) &&
+    (session.patient ? session.patient.preferredLanguage !== language : true);
+  if (session.patient) session.patient.preferredLanguage = language;
+  const profileLanguage = document.querySelector('#profile-form [name="language"]');
+  if (profileLanguage) profileLanguage.value = language;
+  if (preferenceChanged) {
+    void apiRequest('profile/language', { method: 'PATCH', body: { language } }).catch(showApiError);
+  }
+});
+
+document.addEventListener('invalid', (event) => {
+  const field = event.target;
+  if (!(field instanceof HTMLInputElement || field instanceof HTMLSelectElement || field instanceof HTMLTextAreaElement)) return;
+  const validity = field.validity;
+  let message = 'Please enter a valid value.';
+  if (validity.valueMissing) message = 'Please fill out this field.';
+  else if (validity.typeMismatch && field.type === 'email') message = 'Please enter a valid email address.';
+  else if (validity.rangeUnderflow && field.type === 'date' && field.min) {
+    message = i18n.translate('Please choose a date on or after {min}.', { min: field.min });
+    field.setCustomValidity(message);
+    return;
+  }
+  else if (validity.rangeUnderflow && field.min) message = `Please enter a number greater than or equal to {min}.`.replace('{min}', field.min);
+  else if (validity.rangeOverflow && field.max) message = `Please enter a number less than or equal to {max}.`.replace('{max}', field.max);
+  else if (validity.tooLong && field.maxLength >= 0) message = `Please shorten this text to {max} characters or fewer.`.replace('{max}', String(field.maxLength));
+  else if (validity.tooShort && field.minLength >= 0) message = `Please lengthen this text to {min} characters or more.`.replace('{min}', String(field.minLength));
+  field.setCustomValidity(i18n.translate(message));
+}, true);
+
+document.addEventListener('input', (event) => {
+  const field = event.target;
+  if (field instanceof HTMLInputElement || field instanceof HTMLSelectElement || field instanceof HTMLTextAreaElement) {
+    field.setCustomValidity('');
+  }
+}, true);
+
+document.addEventListener('change', (event) => {
+  const field = event.target;
+  if (field instanceof HTMLInputElement || field instanceof HTMLSelectElement || field instanceof HTMLTextAreaElement) {
+    field.setCustomValidity('');
+  }
+}, true);
